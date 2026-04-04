@@ -11,9 +11,6 @@ dependencies = [
     "pyobjc-framework-Cocoa>=11.0",
 ]
 
-[project.scripts]
-formato = "main:main"
-
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
