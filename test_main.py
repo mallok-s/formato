@@ -110,6 +110,9 @@ class TestState:
 class TestFetchAndStore:
     URL = "https://github.com/owner/repo/pull/42"
 
+    def setup_method(self):
+        main._title_cache.clear()
+
     def test_stores_formatted_on_success(self):
         state = main.State()
         state.set_pending(self.URL)
@@ -154,3 +157,22 @@ class TestFetchAndStore:
         with patch("main.requests.get", return_value=mock_response):
             main.fetch_and_store(self.URL, "owner", "repo", "42", None, state)
         assert state.take_formatted() is None
+
+    def test_cache_hit_skips_network_request(self):
+        main._title_cache[self.URL] = "Cached Title"
+        state = main.State()
+        state.set_pending(self.URL)
+        with patch("main.requests.get") as mock_get:
+            main.fetch_and_store(self.URL, "owner", "repo", "42", None, state)
+        mock_get.assert_not_called()
+        assert state.take_formatted() == "[Cached Title](https://github.com/owner/repo/pull/42)"
+
+    def test_successful_fetch_populates_cache(self):
+        main._title_cache.pop(self.URL, None)
+        state = main.State()
+        state.set_pending(self.URL)
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"title": "New Title"}
+        with patch("main.requests.get", return_value=mock_response):
+            main.fetch_and_store(self.URL, "owner", "repo", "42", None, state)
+        assert main._title_cache[self.URL] == "New Title"

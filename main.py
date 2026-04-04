@@ -50,7 +50,16 @@ class State:
             self.swap_on_ready = False
 
 
+_title_cache: dict[str, str] = {}
+
+
 def fetch_and_store(url: str, owner: str, repo: str, number: str, token: str | None, state: State) -> None:
+    if url in _title_cache:
+        title = _title_cache[url]
+        state.set_formatted(url, f"[{title}]({url})")
+        print(f"Cache hit: [{title}]({url})")
+        return
+
     api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}"
     headers = {"Accept": "application/vnd.github+json"}
     if token:
@@ -60,6 +69,7 @@ def fetch_and_store(url: str, owner: str, repo: str, number: str, token: str | N
         response.raise_for_status()
         title = response.json().get("title")
         if title:
+            _title_cache[url] = title
             state.set_formatted(url, f"[{title}]({url})")
             print(f"Pre-fetched: [{title}]({url})")
     except requests.RequestException as e:
