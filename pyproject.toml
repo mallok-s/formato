@@ -7,7 +7,12 @@ requires-python = ">=3.14"
 dependencies = [
     "ruff>=0.15.9",
     "ty>=0.0.28",
+    "requests>=2.32.0",
+    "pyobjc-framework-Cocoa>=11.0",
 ]
+
+[project.scripts]
+formato = "main:main"
 
 [dependency-groups]
 dev = [
