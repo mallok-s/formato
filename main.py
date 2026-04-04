@@ -1,11 +1,13 @@
+import logging
 import os
 import re
-import sys
 import threading
 import time
 
 import requests
 from AppKit import NSPasteboard, NSWorkspace
+
+log = logging.getLogger(__name__)
 
 GITHUB_PR_PATTERN = re.compile(
     r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$"
@@ -57,7 +59,7 @@ def fetch_and_store(url: str, owner: str, repo: str, number: str, token: str | N
     if url in _title_cache:
         title = _title_cache[url]
         state.set_formatted(url, f"[{title}]({url})")
-        print(f"Cache hit: [{title}]({url})")
+        log.debug("Cache hit: [%s](%s)", title, url)
         return
 
     api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}"
@@ -71,9 +73,9 @@ def fetch_and_store(url: str, owner: str, repo: str, number: str, token: str | N
         if title:
             _title_cache[url] = title
             state.set_formatted(url, f"[{title}]({url})")
-            print(f"Pre-fetched: [{title}]({url})")
+            log.info("Pre-fetched: [%s](%s)", title, url)
     except requests.RequestException as e:
-        print(f"GitHub API error: {e}", file=sys.stderr)
+        log.error("GitHub API error: %s", e)
 
 
 def is_slack_active() -> bool:
@@ -91,16 +93,18 @@ def set_clipboard(pb: NSPasteboard, text: str) -> None:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
-        print("Warning: GITHUB_TOKEN not set. Rate limits may apply.", file=sys.stderr)
+        log.warning("GITHUB_TOKEN not set. Rate limits may apply.")
 
     pb = NSPasteboard.generalPasteboard()
     state = State()
     last_count = pb.changeCount()
     slack_was_active = is_slack_active()
 
-    print("formato running — watching clipboard for GitHub PR links...")
+    log.info("formato running — watching clipboard for GitHub PR links...")
 
     while True:
         time.sleep(POLL_INTERVAL)
@@ -115,7 +119,7 @@ def main() -> None:
                 match = GITHUB_PR_PATTERN.match(url)
                 if match:
                     owner, repo, number = match.groups()
-                    print(f"Detected PR: {owner}/{repo}#{number} — pre-fetching...")
+                    log.info("Detected PR: %s/%s#%s — pre-fetching...", owner, repo, number)
                     state.set_pending(url, swap_on_ready=slack_now_active)
                     threading.Thread(
                         target=fetch_and_store,
@@ -133,7 +137,7 @@ def main() -> None:
             if formatted:
                 set_clipboard(pb, formatted)
                 last_count = pb.changeCount()  # absorb our own write
-                print(f"Swapped clipboard for Slack: {formatted}")
+                log.info("Swapped clipboard for Slack: %s", formatted)
         slack_was_active = slack_now_active
 
 
