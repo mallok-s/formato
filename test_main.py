@@ -54,7 +54,7 @@ class TestState:
         state.set_pending(url)
         state.set_formatted(url, "Title", f'<a href="{url}">Title</a>')
         result = state.take_formatted()
-        assert result == ("Title", f'<a href="{url}">Title</a>')
+        assert result == (url, "Title", f'<a href="{url}">Title</a>')
 
     def test_take_formatted_clears_state(self):
         state = main.State()
@@ -109,6 +109,33 @@ class TestState:
         state.set_pending("https://github.com/o/r/pull/2")
         assert state.take_formatted() is None
 
+    def test_set_and_take_swapped(self):
+        state = main.State()
+        state.set_swapped("https://github.com/o/r/pull/1")
+        assert state.take_swapped() == "https://github.com/o/r/pull/1"
+
+    def test_take_swapped_returns_none_when_empty(self):
+        state = main.State()
+        assert state.take_swapped() is None
+
+    def test_take_swapped_clears_state(self):
+        state = main.State()
+        state.set_swapped("https://github.com/o/r/pull/1")
+        state.take_swapped()
+        assert state.take_swapped() is None
+
+    def test_set_pending_clears_swapped(self):
+        state = main.State()
+        state.set_swapped("https://github.com/o/r/pull/1")
+        state.set_pending("https://github.com/o/r/pull/2")
+        assert state.take_swapped() is None
+
+    def test_clear_resets_swapped(self):
+        state = main.State()
+        state.set_swapped("https://github.com/o/r/pull/1")
+        state.clear()
+        assert state.take_swapped() is None
+
 
 # --- fetch_and_store ---
 
@@ -125,7 +152,7 @@ class TestFetchAndStore:
         mock_response.json.return_value = {"title": "Fix the bug"}
         with patch("main.requests.get", return_value=mock_response):
             main.fetch_and_store(self.URL, "owner", "repo", "42", None, state)
-        assert state.take_formatted() == ("Fix the bug", '<a href="https://github.com/owner/repo/pull/42">Fix the bug</a>')
+        assert state.take_formatted() == (self.URL, "Fix the bug", '<a href="https://github.com/owner/repo/pull/42">Fix the bug</a>')
 
     def test_includes_auth_header_with_token(self):
         state = main.State()
@@ -170,7 +197,7 @@ class TestFetchAndStore:
         with patch("main.requests.get") as mock_get:
             main.fetch_and_store(self.URL, "owner", "repo", "42", None, state)
         mock_get.assert_not_called()
-        assert state.take_formatted() == ("Cached Title", '<a href="https://github.com/owner/repo/pull/42">Cached Title</a>')
+        assert state.take_formatted() == (self.URL, "Cached Title", '<a href="https://github.com/owner/repo/pull/42">Cached Title</a>')
 
     def test_successful_fetch_populates_cache(self):
         main._title_cache.pop(self.URL, None)

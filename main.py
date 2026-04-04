@@ -22,6 +22,7 @@ class State:
         self._pending_url: str | None = None
         self._title: str | None = None
         self._html: str | None = None
+        self._swapped_url: str | None = None  # original URL to restore if user leaves Slack
         self.swap_on_ready: bool = False  # True if Slack was already active when URL was copied
         self._lock = threading.Lock()
 
@@ -30,6 +31,7 @@ class State:
             self._pending_url = url
             self._title = None
             self._html = None
+            self._swapped_url = None
             self.swap_on_ready = swap_on_ready
 
     def set_formatted(self, url: str, title: str, html: str) -> None:
@@ -38,23 +40,34 @@ class State:
                 self._title = title
                 self._html = html
 
-    def take_formatted(self) -> tuple[str, str] | None:
-        """Returns (title, html) and clears state, or None if not ready."""
+    def take_formatted(self) -> tuple[str, str, str] | None:
+        """Returns (original_url, title, html) and clears state, or None if not ready."""
         with self._lock:
             if self._title is None:
                 return None
-            result = (self._title, self._html)
+            result = (self._pending_url, self._title, self._html)
             self._pending_url = None
             self._title = None
             self._html = None
             self.swap_on_ready = False
             return result
 
+    def set_swapped(self, url: str) -> None:
+        with self._lock:
+            self._swapped_url = url
+
+    def take_swapped(self) -> str | None:
+        with self._lock:
+            url = self._swapped_url
+            self._swapped_url = None
+            return url
+
     def clear(self) -> None:
         with self._lock:
             self._pending_url = None
             self._title = None
             self._html = None
+            self._swapped_url = None
             self.swap_on_ready = False
 
 
@@ -130,6 +143,7 @@ def main() -> None:
         current_count = pb.changeCount()
         if current_count != last_count:
             last_count = current_count
+            state.take_swapped()  # user copied something new, discard any pending restore
             content = get_clipboard(pb)
             if content:
                 url = content.strip()
@@ -155,10 +169,20 @@ def main() -> None:
         if should_swap:
             result = state.take_formatted()
             if result:
-                title, html = result
+                original_url, title, html = result
                 set_clipboard(pb, title, html)
                 last_count = pb.changeCount()  # absorb our own write
+                state.set_swapped(original_url)
                 log.info("Swapped clipboard for Slack: %s", title)
+
+        # Restore original URL when leaving Slack
+        if slack_was_active and not slack_now_active:
+            original_url = state.take_swapped()
+            if original_url:
+                set_clipboard(pb, original_url)
+                last_count = pb.changeCount()  # absorb our own write
+                log.info("Restored clipboard: %s", original_url)
+
         slack_was_active = slack_now_active
 
 
