@@ -4,14 +4,14 @@ import re
 import threading
 import time
 
+import subprocess
+
 import requests
-from AppKit import NSPasteboard, NSWorkspace
+from AppKit import NSPasteboard
 
 log = logging.getLogger(__name__)
 
-GITHUB_PR_PATTERN = re.compile(
-    r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$"
-)
+GITHUB_PR_PATTERN = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$")
 POLL_INTERVAL = 0.1
 PBOARD_TYPE = "public.utf8-plain-text"
 SLACK_BUNDLE_ID = "com.tinyspeck.slackmacgap"
@@ -20,46 +20,54 @@ SLACK_BUNDLE_ID = "com.tinyspeck.slackmacgap"
 class State:
     def __init__(self):
         self._pending_url: str | None = None
-        self._formatted: str | None = None
+        self._title: str | None = None
+        self._html: str | None = None
         self.swap_on_ready: bool = False  # True if Slack was already active when URL was copied
         self._lock = threading.Lock()
 
     def set_pending(self, url: str, swap_on_ready: bool = False) -> None:
         with self._lock:
             self._pending_url = url
-            self._formatted = None
+            self._title = None
+            self._html = None
             self.swap_on_ready = swap_on_ready
 
-    def set_formatted(self, url: str, formatted: str) -> None:
+    def set_formatted(self, url: str, title: str, html: str) -> None:
         with self._lock:
             if self._pending_url == url:  # discard if user already copied something else
-                self._formatted = formatted
+                self._title = title
+                self._html = html
 
-    def take_formatted(self) -> str | None:
-        """Returns the formatted string and clears state, or None if not ready."""
+    def take_formatted(self) -> tuple[str, str] | None:
+        """Returns (title, html) and clears state, or None if not ready."""
         with self._lock:
-            result = self._formatted
-            if result:
-                self._pending_url = None
-                self._formatted = None
-                self.swap_on_ready = False
+            if self._title is None:
+                return None
+            result = (self._title, self._html)
+            self._pending_url = None
+            self._title = None
+            self._html = None
+            self.swap_on_ready = False
             return result
 
     def clear(self) -> None:
         with self._lock:
             self._pending_url = None
-            self._formatted = None
+            self._title = None
+            self._html = None
             self.swap_on_ready = False
 
 
 _title_cache: dict[str, str] = {}
 
 
-def fetch_and_store(url: str, owner: str, repo: str, number: str, token: str | None, state: State) -> None:
+def fetch_and_store(
+    url: str, owner: str, repo: str, number: str, token: str | None, state: State
+) -> None:
     if url in _title_cache:
         title = _title_cache[url]
-        state.set_formatted(url, f"[{title}]({url})")
-        log.debug("Cache hit: [%s](%s)", title, url)
+        state.set_formatted(url, title, f'<a href="{url}">{title}</a>')
+        log.debug("Cache hit: %s (%s)", title, url)
         return
 
     api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}"
@@ -72,28 +80,36 @@ def fetch_and_store(url: str, owner: str, repo: str, number: str, token: str | N
         title = response.json().get("title")
         if title:
             _title_cache[url] = title
-            state.set_formatted(url, f"[{title}]({url})")
+            state.set_formatted(url, title, f'<a href="{url}">{title}</a>')
             log.info("Pre-fetched: [%s](%s)", title, url)
     except requests.RequestException as e:
         log.error("GitHub API error: %s", e)
 
 
 def is_slack_active() -> bool:
-    app = NSWorkspace.sharedWorkspace().frontmostApplication()
-    return app is not None and app.bundleIdentifier() == SLACK_BUNDLE_ID
+    result = subprocess.run(
+        ["osascript", "-e", "tell application \"System Events\" to get bundle identifier of first application process whose frontmost is true"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() == SLACK_BUNDLE_ID
 
 
 def get_clipboard(pb: NSPasteboard) -> str | None:
     return pb.stringForType_(PBOARD_TYPE)
 
 
-def set_clipboard(pb: NSPasteboard, text: str) -> None:
+def set_clipboard(pb: NSPasteboard, text: str, html: str | None = None) -> None:
     pb.clearContents()
+    if html:
+        pb.setString_forType_(html, "public.html")
     pb.setString_forType_(text, PBOARD_TYPE)
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
 
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
@@ -109,6 +125,7 @@ def main() -> None:
     while True:
         time.sleep(POLL_INTERVAL)
 
+        slack_now_active = is_slack_active()
         # Detect clipboard changes
         current_count = pb.changeCount()
         if current_count != last_count:
@@ -119,7 +136,9 @@ def main() -> None:
                 match = GITHUB_PR_PATTERN.match(url)
                 if match:
                     owner, repo, number = match.groups()
-                    log.info("Detected PR: %s/%s#%s — pre-fetching...", owner, repo, number)
+                    log.info(
+                        "Detected PR: %s/%s#%s — pre-fetching...", owner, repo, number
+                    )
                     state.set_pending(url, swap_on_ready=slack_now_active)
                     threading.Thread(
                         target=fetch_and_store,
@@ -130,14 +149,16 @@ def main() -> None:
                     state.clear()
 
         # Detect Slack becoming active (transition) or fetch completing while already in Slack
-        slack_now_active = is_slack_active()
-        should_swap = (slack_now_active and not slack_was_active) or (slack_now_active and state.swap_on_ready)
+        should_swap = (slack_now_active and not slack_was_active) or (
+            slack_now_active and state.swap_on_ready
+        )
         if should_swap:
-            formatted = state.take_formatted()
-            if formatted:
-                set_clipboard(pb, formatted)
+            result = state.take_formatted()
+            if result:
+                title, html = result
+                set_clipboard(pb, title, html)
                 last_count = pb.changeCount()  # absorb our own write
-                log.info("Swapped clipboard for Slack: %s", formatted)
+                log.info("Swapped clipboard for Slack: %s", title)
         slack_was_active = slack_now_active
 
 

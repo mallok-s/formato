@@ -50,15 +50,17 @@ class TestState:
 
     def test_set_and_take_formatted(self):
         state = main.State()
-        state.set_pending("https://github.com/o/r/pull/1")
-        state.set_formatted("https://github.com/o/r/pull/1", "[Title](https://github.com/o/r/pull/1)")
+        url = "https://github.com/o/r/pull/1"
+        state.set_pending(url)
+        state.set_formatted(url, "Title", f'<a href="{url}">Title</a>')
         result = state.take_formatted()
-        assert result == "[Title](https://github.com/o/r/pull/1)"
+        assert result == ("Title", f'<a href="{url}">Title</a>')
 
     def test_take_formatted_clears_state(self):
         state = main.State()
-        state.set_pending("https://github.com/o/r/pull/1")
-        state.set_formatted("https://github.com/o/r/pull/1", "[Title](url)")
+        url = "https://github.com/o/r/pull/1"
+        state.set_pending(url)
+        state.set_formatted(url, "Title", f'<a href="{url}">Title</a>')
         state.take_formatted()
         assert state.take_formatted() is None
 
@@ -68,7 +70,7 @@ class TestState:
         # User copies something new before fetch completes
         state.set_pending("https://github.com/o/r/pull/2")
         # Stale fetch for PR #1 arrives
-        state.set_formatted("https://github.com/o/r/pull/1", "[Old](url)")
+        state.set_formatted("https://github.com/o/r/pull/1", "Old", "<a>Old</a>")
         assert state.take_formatted() is None
 
     def test_swap_on_ready_set_when_slack_active(self):
@@ -83,23 +85,26 @@ class TestState:
 
     def test_swap_on_ready_cleared_after_take(self):
         state = main.State()
-        state.set_pending("https://github.com/o/r/pull/1", swap_on_ready=True)
-        state.set_formatted("https://github.com/o/r/pull/1", "[Title](url)")
+        url = "https://github.com/o/r/pull/1"
+        state.set_pending(url, swap_on_ready=True)
+        state.set_formatted(url, "Title", f'<a href="{url}">Title</a>')
         state.take_formatted()
         assert state.swap_on_ready is False
 
     def test_clear_resets_all(self):
         state = main.State()
-        state.set_pending("https://github.com/o/r/pull/1", swap_on_ready=True)
-        state.set_formatted("https://github.com/o/r/pull/1", "[Title](url)")
+        url = "https://github.com/o/r/pull/1"
+        state.set_pending(url, swap_on_ready=True)
+        state.set_formatted(url, "Title", f'<a href="{url}">Title</a>')
         state.clear()
         assert state.take_formatted() is None
         assert state.swap_on_ready is False
 
     def test_set_pending_clears_previous_formatted(self):
         state = main.State()
-        state.set_pending("https://github.com/o/r/pull/1")
-        state.set_formatted("https://github.com/o/r/pull/1", "[Title](url)")
+        url = "https://github.com/o/r/pull/1"
+        state.set_pending(url)
+        state.set_formatted(url, "Title", f'<a href="{url}">Title</a>')
         # New URL copied before user switches to Slack
         state.set_pending("https://github.com/o/r/pull/2")
         assert state.take_formatted() is None
@@ -120,7 +125,7 @@ class TestFetchAndStore:
         mock_response.json.return_value = {"title": "Fix the bug"}
         with patch("main.requests.get", return_value=mock_response):
             main.fetch_and_store(self.URL, "owner", "repo", "42", None, state)
-        assert state.take_formatted() == "[Fix the bug](https://github.com/owner/repo/pull/42)"
+        assert state.take_formatted() == ("Fix the bug", '<a href="https://github.com/owner/repo/pull/42">Fix the bug</a>')
 
     def test_includes_auth_header_with_token(self):
         state = main.State()
@@ -165,7 +170,7 @@ class TestFetchAndStore:
         with patch("main.requests.get") as mock_get:
             main.fetch_and_store(self.URL, "owner", "repo", "42", None, state)
         mock_get.assert_not_called()
-        assert state.take_formatted() == "[Cached Title](https://github.com/owner/repo/pull/42)"
+        assert state.take_formatted() == ("Cached Title", '<a href="https://github.com/owner/repo/pull/42">Cached Title</a>')
 
     def test_successful_fetch_populates_cache(self):
         main._title_cache.pop(self.URL, None)
