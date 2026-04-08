@@ -99,13 +99,31 @@ def fetch_and_store(
         log.error("GitHub API error: %s", e)
 
 
+_slack_active = False
+_slack_lock = threading.Lock()
+
+
+def _slack_monitor() -> None:
+    global _slack_active
+    while True:
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", "tell application \"System Events\" to get bundle identifier of first application process whose frontmost is true"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            active = result.stdout.strip() == SLACK_BUNDLE_ID
+        except Exception:
+            active = False
+        with _slack_lock:
+            _slack_active = active
+        time.sleep(0.25)
+
+
 def is_slack_active() -> bool:
-    result = subprocess.run(
-        ["osascript", "-e", "tell application \"System Events\" to get bundle identifier of first application process whose frontmost is true"],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() == SLACK_BUNDLE_ID
+    with _slack_lock:
+        return _slack_active
 
 
 def get_clipboard(pb: NSPasteboard) -> str | None:
@@ -123,6 +141,8 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
+
+    threading.Thread(target=_slack_monitor, daemon=True).start()
 
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
