@@ -124,6 +124,17 @@ class TestState:
         state.take_swapped()
         assert state.take_swapped() is None
 
+    def test_set_swap_on_ready_sets_flag_when_pending(self):
+        state = main.State()
+        state.set_pending("https://github.com/o/r/pull/1")
+        state.set_swap_on_ready()
+        assert state.swap_on_ready is True
+
+    def test_set_swap_on_ready_no_op_when_nothing_pending(self):
+        state = main.State()
+        state.set_swap_on_ready()
+        assert state.swap_on_ready is False
+
     def test_set_pending_clears_swapped(self):
         state = main.State()
         state.set_swapped("https://github.com/o/r/pull/1")

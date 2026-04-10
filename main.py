@@ -56,6 +56,11 @@ class State:
         with self._lock:
             self._swapped_url = url
 
+    def set_swap_on_ready(self) -> None:
+        with self._lock:
+            if self._pending_url is not None:
+                self.swap_on_ready = True
+
     def take_swapped(self) -> str | None:
         with self._lock:
             url = self._swapped_url
@@ -182,11 +187,11 @@ def main() -> None:
                 else:
                     state.clear()
 
-        # Detect Slack becoming active (transition) or fetch completing while already in Slack
-        should_swap = (slack_now_active and not slack_was_active) or (
-            slack_now_active and state.swap_on_ready
-        )
-        if should_swap:
+        # Detect Slack becoming active — ensure swap happens even if fetch isn't done yet
+        if slack_now_active and not slack_was_active:
+            state.set_swap_on_ready()
+
+        if slack_now_active and state.swap_on_ready:
             result = state.take_formatted()
             if result:
                 original_url, title, html = result
