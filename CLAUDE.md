@@ -22,8 +22,10 @@ GITHUB_TOKEN=your_token uv run python main.py
 ## Key design decisions
 
 - **`NSWorkspace` is not used for app detection** — it returns the terminal process instead of the actual frontmost app when run from CLI. `osascript` is used instead.
+- **Slack detection runs in a background thread** — polling `osascript` on the main thread caused multi-monitor flakiness; the background thread updates a shared flag every 250ms.
 - **HTML clipboard format** — Slack's `<url|title>` mrkdwn format only works in the API, not the composer. Pasting HTML `<a href>` is what renders as a hyperlink.
 - **Pre-fetching** — the title is fetched the moment a PR URL is copied, so there's no delay at paste time.
+- **`swap_on_ready` flag** — when the user switches to Slack before the GitHub fetch completes, the swap is deferred via this flag rather than dropped. The main loop retries every poll until the fetch finishes.
 - **In-memory title cache** — repeated copies of the same PR URL skip the network request.
 
 ## Testing
