@@ -1,17 +1,21 @@
 [project]
 name = "formato"
 version = "0.1.0"
-description = "Add your description here"
+description = "Auto-formats GitHub PR URLs into hyperlinks when pasting into Slack"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "ruff>=0.15.9",
-    "ty>=0.0.28",
     "requests>=2.32.0",
     "pyobjc-framework-Cocoa>=11.0",
+    "pydantic-settings[toml]>=2.0",
 ]
+
+[project.scripts]
+formato = "formato.cli:main"
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "ruff>=0.15.9",
+    "ty>=0.0.28",
 ]
